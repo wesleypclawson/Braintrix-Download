@@ -336,11 +336,18 @@
 
     canvas {
       width: 100%;
-      height: 140px;
+      height: 160px;
       display: block;
       background: var(--bg-0);
       border: 1px solid var(--line);
       border-radius: 4px;
+    }
+
+    .plot-hint {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: right;
+      margin-top: -0.15rem;
     }
 
     footer {
@@ -517,7 +524,7 @@
       <!-- Plots -->
       <div class="panel">
         <div class="panel-head">
-          <span>Live traces</span>
+          <span>Full response</span>
           <span id="modeTag">Current clamp</span>
         </div>
         <div class="plots">
@@ -526,15 +533,16 @@
               <span>Membrane voltage Vₘ</span>
               <span class="live" id="liveV">−70.0 mV</span>
             </h3>
-            <canvas id="canvasV" width="560" height="140"></canvas>
+            <canvas id="canvasV" width="560" height="160"></canvas>
           </div>
           <div class="plot-block">
             <h3>
               <span>Electrode current I</span>
               <span class="live" id="liveI">0.0 pA</span>
             </h3>
-            <canvas id="canvasI" width="560" height="140"></canvas>
+            <canvas id="canvasI" width="560" height="160"></canvas>
           </div>
+          <p class="plot-hint" id="plotHint">Window = 8τ · step onset at 1τ</p>
         </div>
       </div>
     </div>
@@ -549,29 +557,24 @@
   // ---------- State ----------
   const state = {
     mode: "iclamp", // "iclamp" | "vclamp"
+    protocol: "hold", // "hold" | "pulse" | "rest"
     Rm: 100e6,      // Ohm
     Cm: 100e-12,    // Farad
     Em: -70e-3,     // Volt
-    Iinj: 100e-12,  // Amp (command when pulsing)
+    Iinj: 100e-12,  // Amp
     Vcmd: -40e-3,   // Volt
     Ra: 10e6,       // Ohm
-    Vm: -70e-3,
-    Vp: -70e-3,     // pipette / electrode node voltage
-    stimulusOn: false,
-    Ielectrode: 0,
-    t: 0,
   };
 
-  const DT = 0.02e-3;       // 0.02 ms integration step
-  const WINDOW_MS = 80;     // visible time window
-  const SAMPLE_EVERY = 5;   // push to buffer every N steps
-  const bufLen = Math.ceil(WINDOW_MS / (DT * 1e3 * SAMPLE_EVERY));
-
-  const bufV = new Float64Array(bufLen).fill(state.Em);
-  const bufI = new Float64Array(bufLen).fill(0);
-  const bufCmd = new Float64Array(bufLen).fill(state.Em);
-  let bufIdx = 0;
-  let sampleCounter = 0;
+  const N = 800; // samples across the full response window
+  const trace = {
+    tMs: new Float64Array(N),
+    Vm: new Float64Array(N),
+    I: new Float64Array(N),
+    cmd: new Float64Array(N),
+    windowMs: 80,
+    onsetMs: 10,
+  };
 
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
@@ -582,7 +585,7 @@
     tauVal: $("tauVal"), liveV: $("liveV"), liveI: $("liveI"),
     modeI: $("modeI"), modeV: $("modeV"), modeTag: $("modeTag"),
     ctrlIinj: $("ctrlIinj"), ctrlVcmd: $("ctrlVcmd"), ctrlRa: $("ctrlRa"),
-    cmdLegend: $("cmdLegend"),
+    cmdLegend: $("cmdLegend"), plotHint: $("plotHint"),
     srcIclamp: $("src-Iclamp"), srcVclamp: $("src-Vclamp"),
     srcLabel: $("srcLabel"), srcCellLabel: $("srcCellLabel"),
     canvasV: $("canvasV"), canvasI: $("canvasI"),
@@ -591,16 +594,31 @@
 
   const ctxV = el.canvasV.getContext("2d");
   const ctxI = el.canvasI.getContext("2d");
+  const PLOT_H = 160;
 
   // ---------- Formatting ----------
   function fmtMv(v) { return (v * 1e3).toFixed(1) + " mV"; }
-  function fmtPa(i) { return (i * 1e12).toFixed(1) + " pA"; }
+  function fmtPa(i) {
+    const p = i * 1e12;
+    const abs = Math.abs(p);
+    if (abs >= 1000) return (p / 1000).toFixed(2) + " nA";
+    return p.toFixed(1) + " pA";
+  }
+  function fmtAxis(v, unit) {
+    const abs = Math.abs(v);
+    if (unit === "mV") return v.toFixed(abs >= 10 ? 0 : 1);
+    // pA axis — switch to nA labeling when large
+    if (abs >= 1000) return (v / 1000).toFixed(abs >= 10000 ? 1 : 2) + "n";
+    return v.toFixed(abs >= 10 ? 0 : 1);
+  }
   function fmtMohm(r) {
     const m = r / 1e6;
     return (m < 10 ? m.toFixed(1) : m.toFixed(0)) + " MΩ";
   }
   function fmtPf(c) { return (c * 1e12).toFixed(0) + " pF"; }
   function fmtTau(ms) { return ms.toFixed(1) + " ms"; }
+
+  function tauSec() { return state.Rm * state.Cm; }
 
   function updateLabels() {
     el.RmVal.textContent = fmtMohm(state.Rm);
@@ -609,8 +627,7 @@
     el.IinjVal.textContent = fmtPa(state.Iinj);
     el.VcmdVal.textContent = fmtMv(state.Vcmd);
     el.RaVal.textContent = fmtMohm(state.Ra);
-    const tauMs = state.Rm * state.Cm * 1e3;
-    el.tauVal.textContent = fmtTau(tauMs);
+    el.tauVal.textContent = fmtTau(tauSec() * 1e3);
   }
 
   // ---------- Flash highlight ----------
@@ -623,7 +640,7 @@
     setTimeout(() => g.classList.remove("flash"), 560);
   }
 
-  // ---------- Mode ----------
+  // ---------- Mode / protocol ----------
   function setMode(mode) {
     state.mode = mode;
     const isI = mode === "iclamp";
@@ -638,72 +655,99 @@
     el.srcVclamp.style.display = isI ? "none" : "";
     el.srcLabel.textContent = isI ? "Iᵢₙⱼ" : "Vcmd";
     el.srcCellLabel.textContent = isI ? "electrode current" : "clamp command";
-    state.stimulusOn = false;
-    // Continuity: keep Vm, set Vp ≈ Vm
-    state.Vp = state.Vm;
     flash("comp-Source");
+    recompute();
   }
 
-  // ---------- Simulation ----------
-  function electrodeCurrent() {
-    // Current through Ra from pipette node toward membrane
-    return (state.Vp - state.Vm) / Math.max(state.Ra, 1);
+  function setProtocol(protocol) {
+    state.protocol = protocol;
+    el.btnPulse.classList.toggle("primary", protocol === "pulse");
+    el.btnHold.classList.toggle("primary", protocol === "hold");
+    if (protocol !== "rest") flash("comp-Source");
+    recompute();
   }
 
-  function step() {
-    const { Rm, Cm, Em, Ra } = state;
-    let IinjNow = 0;
-    let VpCmd = state.Vm;
+  // ---------- Full-response simulation ----------
+  function stimulusActive(tSec, onset, pulseWidth) {
+    if (state.protocol === "rest") return false;
+    if (tSec < onset) return false;
+    if (state.protocol === "hold") return true;
+    return tSec < onset + pulseWidth;
+  }
 
-    if (state.mode === "iclamp") {
-      IinjNow = state.stimulusOn ? state.Iinj : 0;
-      // Ideal current injection into membrane node; Ra still present as series
-      // but electrode forces current. Model: current source after Ra,
-      // so current through Ra equals Iinj, and Vm evolves from membrane currents.
-      // Simpler teaching model for Iclamp: inject directly into Vm (Ra bypassed for injection),
-      // still show Ra on diagram. For patch realism Ra matters most in Vclamp.
-      const Iion = (state.Vm - Em) / Rm;
-      const dVm = (IinjNow - Iion) / Cm;
-      state.Vm += dVm * DT;
-      state.Vp = state.Vm + IinjNow * Ra; // ohmic drop along access
-      state.Ielectrode = IinjNow;
-    } else {
-      // Voltage clamp: pipette node held at Vcmd (ideal amp), membrane through Ra
-      VpCmd = state.stimulusOn ? state.Vcmd : state.Em;
-      state.Vp = VpCmd;
-      const I_a = (state.Vp - state.Vm) / Math.max(Ra, 1);
-      const Iion = (state.Vm - Em) / Rm;
-      const dVm = (I_a - Iion) / Cm;
-      state.Vm += dVm * DT;
-      state.Ielectrode = I_a; // current supplied by clamp amp
+  function recompute() {
+    const { Rm, Cm, Em, Ra, Iinj, Vcmd, mode } = state;
+    const tau = Math.max(tauSec(), 1e-6);
+    // Window spans several τ so the exponential fully settles on screen
+    const windowSec = 8 * tau;
+    const onset = 1 * tau;
+    const pulseWidth = 2 * tau;
+    const dtSample = windowSec / (N - 1);
+    // Sub-step for stability when Ra·Cm is much shorter than τ
+    const tauA = Math.max(Ra, 1) * Cm;
+    const dtInt = Math.min(dtSample, tauA / 20, tau / 200);
+
+    let Vm = Em;
+    let lastI = 0;
+
+    for (let i = 0; i < N; i++) {
+      const t0 = i * dtSample;
+      // Integrate from previous sample to this one (skip on first point)
+      if (i > 0) {
+        let t = t0 - dtSample;
+        const tEnd = t0;
+        while (t < tEnd - 1e-15) {
+          const h = Math.min(dtInt, tEnd - t);
+          const on = stimulusActive(t + h * 0.5, onset, pulseWidth);
+          if (mode === "iclamp") {
+            const IinjNow = on ? Iinj : 0;
+            const Iion = (Vm - Em) / Rm;
+            Vm += ((IinjNow - Iion) / Cm) * h;
+            lastI = IinjNow;
+          } else {
+            const Vp = on ? Vcmd : Em;
+            const Ia = (Vp - Vm) / Math.max(Ra, 1);
+            const Iion = (Vm - Em) / Rm;
+            Vm += ((Ia - Iion) / Cm) * h;
+            lastI = Ia;
+          }
+          t += h;
+        }
+      } else {
+        lastI = 0;
+      }
+
+      const onNow = stimulusActive(t0, onset, pulseWidth);
+      let cmd = Em;
+      let Iel = lastI;
+      if (mode === "iclamp") {
+        Iel = onNow ? Iinj : 0;
+        cmd = Em;
+      } else {
+        cmd = onNow ? Vcmd : Em;
+        Iel = (cmd - Vm) / Math.max(Ra, 1);
+      }
+
+      trace.tMs[i] = t0 * 1e3;
+      trace.Vm[i] = Vm;
+      trace.I[i] = Iel;
+      trace.cmd[i] = cmd;
+      lastI = Iel;
     }
 
-    state.t += DT;
-    sampleCounter++;
-    if (sampleCounter >= SAMPLE_EVERY) {
-      sampleCounter = 0;
-      bufV[bufIdx] = state.Vm;
-      bufI[bufIdx] = state.Ielectrode;
-      bufCmd[bufIdx] = state.mode === "vclamp"
-        ? (state.stimulusOn ? state.Vcmd : state.Em)
-        : state.Em;
-      bufIdx = (bufIdx + 1) % bufLen;
-    }
-  }
+    trace.windowMs = windowSec * 1e3;
+    trace.onsetMs = onset * 1e3;
 
-  function resetSim() {
-    state.Vm = state.Em;
-    state.Vp = state.Em;
-    state.Ielectrode = 0;
-    state.stimulusOn = false;
-    state.t = 0;
-    bufV.fill(state.Em);
-    bufI.fill(0);
-    bufCmd.fill(state.Em);
-    bufIdx = 0;
-    sampleCounter = 0;
+    const protoLabel =
+      state.protocol === "pulse" ? "pulse (2τ wide)" :
+      state.protocol === "hold" ? "step hold" : "rest";
+    el.plotHint.textContent =
+      `Window = 8τ (${trace.windowMs.toFixed(1)} ms) · onset at 1τ · ${protoLabel}`;
+
+    el.liveV.textContent = fmtMv(Vm);
+    el.liveI.textContent = fmtPa(lastI);
     updateLabels();
-    flash("comp-Vm");
+    renderPlots();
   }
 
   // ---------- Drawing ----------
@@ -712,93 +756,135 @@
       const rect = c.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       c.width = Math.round(rect.width * dpr);
-      c.height = Math.round(140 * dpr);
+      c.height = Math.round(PLOT_H * dpr);
       c.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
     }
+    renderPlots();
   }
 
-  function drawTrace(ctx, canvas, buffers, colors, yMin, yMax, unitScale) {
+  function dataRange(bufs, scale) {
+    let lo = Infinity, hi = -Infinity;
+    for (const buf of bufs) {
+      for (let i = 0; i < buf.length; i++) {
+        const v = buf[i] * scale;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+      lo = -1; hi = 1;
+    }
+    if (hi === lo) {
+      const pad = Math.max(Math.abs(hi) * 0.1, 1);
+      lo -= pad;
+      hi += pad;
+    } else {
+      const pad = (hi - lo) * 0.12;
+      lo -= pad;
+      hi += pad;
+    }
+    // Keep a tiny span away from zero-collapse
+    if (hi - lo < 1e-6) {
+      lo -= 1;
+      hi += 1;
+    }
+    return { lo, hi };
+  }
+
+  function drawPlot(ctx, canvas, series, yUnit) {
     const w = canvas.clientWidth;
-    const h = 140;
+    const h = PLOT_H;
+    const padL = 44;
+    const padR = 10;
+    const padT = 10;
+    const padB = 22;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+
     ctx.clearRect(0, 0, w, h);
+
+    const bufs = series.map((s) => s.buf);
+    const { lo, hi } = dataRange(bufs, series[0].scale);
+    const yAt = (v) => padT + plotH - ((v - lo) / (hi - lo)) * plotH;
+    const xAt = (i) => padL + (i / (N - 1)) * plotW;
+
+    // plot background
+    ctx.fillStyle = "#0e1418";
+    ctx.fillRect(padL, padT, plotW, plotH);
 
     // grid
     ctx.strokeStyle = "#243440";
     ctx.lineWidth = 1;
-    const nH = 4, nV = 8;
     ctx.beginPath();
-    for (let i = 1; i < nH; i++) {
-      const y = (h * i) / nH;
-      ctx.moveTo(0, y); ctx.lineTo(w, y);
+    for (let i = 1; i < 4; i++) {
+      const y = padT + (plotH * i) / 4;
+      ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y);
     }
-    for (let i = 1; i < nV; i++) {
-      const x = (w * i) / nV;
-      ctx.moveTo(x, 0); ctx.lineTo(x, h);
+    for (let i = 1; i < 8; i++) {
+      const x = padL + (plotW * i) / 8;
+      ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH);
     }
     ctx.stroke();
 
-    // zero / Em reference line if in range
-    const yAt = (v) => h - ((v - yMin) / (yMax - yMin)) * h;
+    // onset marker
+    const onsetX = padL + (trace.onsetMs / trace.windowMs) * plotW;
+    ctx.strokeStyle = "#5a7a8c";
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(onsetX, padT);
+    ctx.lineTo(onsetX, padT + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-    function strokeBuf(buf, color, width) {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
+    // traces
+    for (const s of series) {
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = s.width || 2;
       ctx.beginPath();
-      for (let i = 0; i < bufLen; i++) {
-        const idx = (bufIdx + i) % bufLen;
-        const x = (i / (bufLen - 1)) * w;
-        const y = yAt(buf[idx] * unitScale);
+      for (let i = 0; i < N; i++) {
+        const y = yAt(s.buf[i] * s.scale);
+        const x = xAt(i);
         if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.stroke();
     }
 
-    buffers.forEach((b, i) => strokeBuf(b, colors[i], i === 0 ? 2 : 1.25));
+    // frame
+    ctx.strokeStyle = "#3a5363";
+    ctx.strokeRect(padL, padT, plotW, plotH);
 
-    // axis labels
+    // Y labels
     ctx.fillStyle = "#8aa0ae";
     ctx.font = "10px DM Sans, sans-serif";
-    ctx.fillText(yMax.toFixed(0), 4, 12);
-    ctx.fillText(yMin.toFixed(0), 4, h - 4);
+    ctx.textAlign = "right";
+    ctx.fillText(fmtAxis(hi, yUnit), padL - 4, padT + 10);
+    ctx.fillText(fmtAxis(lo, yUnit), padL - 4, padT + plotH);
+    ctx.fillText(fmtAxis((lo + hi) / 2, yUnit), padL - 4, padT + plotH / 2 + 3);
+
+    // X labels (time)
+    ctx.textAlign = "left";
+    ctx.fillText("0", padL, h - 6);
+    ctx.textAlign = "center";
+    ctx.fillText((trace.windowMs / 2).toFixed(1) + " ms", padL + plotW / 2, h - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(trace.windowMs.toFixed(1) + " ms", padL + plotW, h - 6);
   }
 
   function renderPlots() {
-    // Voltage axis in mV
-    let vMin = -100, vMax = 20;
-    if (state.mode === "iclamp" && state.stimulusOn) {
-      const ss = (state.Em + state.Iinj * state.Rm) * 1e3;
-      vMin = Math.min(-100, ss - 20, state.Em * 1e3 - 15);
-      vMax = Math.max(20, ss + 20, state.Em * 1e3 + 15);
-    } else if (state.mode === "vclamp") {
-      vMin = Math.min(-100, state.Vcmd * 1e3 - 15, state.Em * 1e3 - 15);
-      vMax = Math.max(20, state.Vcmd * 1e3 + 15, state.Em * 1e3 + 15);
-    }
-
-    const vBufs = state.mode === "vclamp" ? [bufV, bufCmd] : [bufV];
-    const vColors = state.mode === "vclamp" ? ["#3dbea0", "#5cb8d4"] : ["#3dbea0"];
-    drawTrace(ctxV, el.canvasV, vBufs, vColors, vMin, vMax, 1e3);
-
-    // Current axis in pA
-    let iMax = 200;
+    const vSeries = [{ buf: trace.Vm, scale: 1e3, color: "#3dbea0", width: 2 }];
     if (state.mode === "vclamp") {
-      const Iss = Math.abs((state.Vcmd - state.Em) / state.Rm) * 1e12;
-      const Ipeak = Math.abs((state.Vcmd - state.Em) / Math.max(state.Ra, 1e3)) * 1e12;
-      iMax = Math.max(200, Iss * 1.4, Math.min(Ipeak * 0.15, 2000));
-    } else {
-      iMax = Math.max(200, Math.abs(state.Iinj) * 1e12 * 1.5);
+      vSeries.push({ buf: trace.cmd, scale: 1e3, color: "#5cb8d4", width: 1.25 });
     }
-    drawTrace(ctxI, el.canvasI, [bufI], ["#e0a45a"], -iMax, iMax, 1e12);
-
-    el.liveV.textContent = fmtMv(state.Vm);
-    el.liveI.textContent = fmtPa(state.Ielectrode);
+    drawPlot(ctxV, el.canvasV, vSeries, "mV");
+    drawPlot(ctxI, el.canvasI, [{ buf: trace.I, scale: 1e12, color: "#e0a45a", width: 2 }], "pA");
   }
 
   // ---------- Events ----------
   function bindSlider(input, apply, flashId) {
     input.addEventListener("input", () => {
       apply(parseFloat(input.value));
-      updateLabels();
       if (flashId) flash(flashId);
+      recompute();
     });
   }
 
@@ -812,49 +898,20 @@
   el.modeI.addEventListener("click", () => setMode("iclamp"));
   el.modeV.addEventListener("click", () => setMode("vclamp"));
 
-  let pulseTimer = null;
-  el.btnPulse.addEventListener("click", () => {
-    if (pulseTimer) clearTimeout(pulseTimer);
-    state.stimulusOn = true;
-    flash("comp-Source");
-    // Brief step (~25 ms sim time ≈ 25 ms wall when realtime)
-    pulseTimer = setTimeout(() => {
-      state.stimulusOn = false;
-      pulseTimer = null;
-    }, 25);
-  });
-  el.btnHold.addEventListener("click", () => {
-    if (pulseTimer) { clearTimeout(pulseTimer); pulseTimer = null; }
-    state.stimulusOn = true;
-    flash("comp-Source");
-  });
+  el.btnPulse.addEventListener("click", () => setProtocol("pulse"));
+  el.btnHold.addEventListener("click", () => setProtocol("hold"));
   el.btnReset.addEventListener("click", () => {
-    if (pulseTimer) { clearTimeout(pulseTimer); pulseTimer = null; }
-    resetSim();
+    setProtocol("rest");
+    flash("comp-Vm");
   });
 
-  window.addEventListener("resize", () => {
-    resizeCanvases();
-  });
+  window.addEventListener("resize", resizeCanvases);
 
-  // ---------- Loop ----------
-  let lastWall = performance.now();
-  const STEPS_PER_MS = 1 / (DT * 1e3); // steps per sim-ms
-  // Run ~ realtime: 1 real ms → 1 sim ms (capped)
-  function frame(now) {
-    const elapsed = Math.min(now - lastWall, 40);
-    lastWall = now;
-    const steps = Math.floor(elapsed * STEPS_PER_MS);
-    for (let i = 0; i < steps; i++) step();
-    renderPlots();
-    requestAnimationFrame(frame);
-  }
-
-  // Init
+  // Init — default hold step so the full response is visible immediately
   updateLabels();
+  el.btnHold.classList.add("primary");
   resizeCanvases();
-  resetSim();
-  requestAnimationFrame(frame);
+  recompute();
 })();
   </script>
 </body>
