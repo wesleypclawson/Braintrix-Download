@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RC Membrane · Patch Clamp Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-0: #0e1418;
+      --bg-1: #152028;
+      --bg-2: #1c2a34;
+      --bg-3: #243440;
+      --line: #3a5363;
+      --line-bright: #5a7a8c;
+      --text: #e4eef4;
+      --muted: #8aa0ae;
+      --teal: #3dbea0;
+      --teal-dim: #2a7a68;
+      --amber: #e0a45a;
+      --amber-dim: #8a6430;
+      --rose: #d47878;
+      --cyan: #5cb8d4;
+      --flash: #f0d878;
+      --font-ui: "DM Sans", system-ui, sans-serif;
+      --font-display: "Instrument Serif", Georgia, serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-ui);
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 0%, rgba(61, 190, 160, 0.08), transparent 50%),
+        radial-gradient(ellipse 60% 40% at 90% 100%, rgba(224, 164, 90, 0.06), transparent 45%),
+        linear-gradient(160deg, var(--bg-0) 0%, #121a20 50%, var(--bg-1) 100%);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.4;
+    }
+
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem 2.5rem;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem 1.5rem;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 0.85rem;
+    }
+
+    header h1 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: clamp(1.6rem, 3vw, 2.1rem);
+      letter-spacing: 0.01em;
+    }
+
+    header h1 span {
+      color: var(--teal);
+      font-style: italic;
+    }
+
+    .tau-badge {
+      font-size: 0.9rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      padding: 0.35rem 0.75rem;
+      border-radius: 4px;
+    }
+
+    .tau-badge strong {
+      color: var(--amber);
+      font-weight: 600;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+
+    @media (min-width: 900px) {
+      .grid {
+        grid-template-columns: 1.05fr 0.95fr;
+        align-items: start;
+      }
+    }
+
+    .panel {
+      background: var(--bg-1);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.65rem 0.9rem;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--line);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .mode-toggle {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .mode-toggle button {
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.35rem 0.65rem;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .mode-toggle button.active {
+      background: var(--teal-dim);
+      color: var(--text);
+    }
+
+    .mode-toggle button:hover:not(.active) {
+      color: var(--text);
+      background: var(--bg-3);
+    }
+
+    .circuit-wrap {
+      padding: 0.75rem;
+      position: relative;
+    }
+
+    .circuit-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .circuit-svg .wire {
+      fill: none;
+      stroke: var(--line-bright);
+      stroke-width: 2;
+    }
+
+    .circuit-svg .comp-label {
+      font-family: var(--font-ui);
+      font-size: 13px;
+      font-weight: 600;
+      fill: var(--text);
+    }
+
+    .circuit-svg .cell-label {
+      font-family: var(--font-ui);
+      font-size: 10px;
+      fill: var(--muted);
+    }
+
+    .circuit-svg .node-dot {
+      fill: var(--teal);
+    }
+
+    .circuit-svg .highlight-ring {
+      fill: none;
+      stroke: var(--flash);
+      stroke-width: 2;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    .circuit-svg .flash .highlight-ring {
+      opacity: 1;
+      animation: pulse-ring 0.55s ease-out;
+    }
+
+    @keyframes pulse-ring {
+      0% { opacity: 1; stroke-width: 3; }
+      100% { opacity: 0; stroke-width: 1; }
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      padding: 0.5rem 0.9rem 0.75rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      margin-right: 0.35rem;
+      vertical-align: middle;
+    }
+
+    .legend .l-v::before { background: var(--teal); }
+    .legend .l-i::before { background: var(--amber); }
+    .legend .l-cmd::before { background: var(--cyan); }
+
+    .controls {
+      padding: 0.85rem 1rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+
+    .ctrl {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.15rem 0.75rem;
+      align-items: center;
+    }
+
+    .ctrl label {
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+
+    .ctrl .sub {
+      grid-column: 1 / -1;
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-top: -0.1rem;
+    }
+
+    .ctrl .val {
+      font-variant-numeric: tabular-nums;
+      font-size: 0.8rem;
+      color: var(--amber);
+      min-width: 4.5rem;
+      text-align: right;
+    }
+
+    .ctrl input[type="range"] {
+      grid-column: 1 / -1;
+      width: 100%;
+      accent-color: var(--teal);
+      height: 1.2rem;
+      cursor: pointer;
+    }
+
+    .ctrl.hidden { display: none; }
+
+    .ctrl.emphasized label {
+      color: var(--cyan);
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .actions button {
+      font-family: var(--font-ui);
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.45rem 0.85rem;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--bg-3);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .actions button:hover {
+      border-color: var(--teal);
+      background: var(--teal-dim);
+    }
+
+    .actions button.primary {
+      background: var(--teal-dim);
+      border-color: var(--teal);
+    }
+
+    .actions button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .compare-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .trace-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.55rem 0.75rem 0.15rem;
+      min-height: 1.6rem;
+    }
+
+    .trace-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.68rem;
+      color: var(--text);
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0.2rem 0.45rem;
+      max-width: 100%;
+    }
+
+    .trace-chip .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .trace-chip.live {
+      border-color: var(--line-bright);
+    }
+
+    .trace-chip button {
+      font-family: var(--font-ui);
+      font-size: 0.65rem;
+      line-height: 1;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0 0.1rem;
+    }
+
+    .trace-chip button:hover { color: var(--rose); }
+
+    .compare-bar button {
+      font-family: var(--font-ui);
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.45rem 0.85rem;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--bg-3);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .compare-bar button:hover:not(:disabled) {
+      border-color: var(--amber);
+      background: var(--amber-dim);
+    }
+
+    .compare-bar button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+
+    .plots {
+      padding: 0.65rem 0.75rem 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+
+    .plot-block {
+      position: relative;
+    }
+
+    .plot-block h3 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-bottom: 0.3rem;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .plot-block h3 .live {
+      font-variant-numeric: tabular-nums;
+      color: var(--text);
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 0.78rem;
+    }
+
+    canvas {
+      width: 100%;
+      height: 160px;
+      display: block;
+      background: var(--bg-0);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+    }
+
+    .plot-hint {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: right;
+      margin-top: -0.15rem;
+    }
+
+    footer {
+      margin-top: 1.25rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>RC Membrane <span>Patch Clamp Lab</span></h1>
+      <div class="tau-badge">τ = R<sub>m</sub>·C<sub>m</sub> = <strong id="tauVal">10.0 ms</strong></div>
+    </header>
+
+    <div class="grid">
+      <!-- Circuit + controls -->
+      <div class="panel">
+        <div class="panel-head">
+          <span>Equivalent circuit</span>
+          <div class="mode-toggle" role="group" aria-label="Clamp mode">
+            <button type="button" id="modeI" class="active">Current clamp</button>
+            <button type="button" id="modeV">Voltage clamp</button>
+          </div>
+        </div>
+
+        <div class="circuit-wrap">
+          <svg class="circuit-svg" id="circuitSvg" viewBox="0 0 520 340" xmlns="http://www.w3.org/2000/svg" aria-label="RC membrane circuit diagram">
+            <!-- Ground -->
+            <g id="gnd">
+              <line class="wire" x1="220" y1="290" x2="220" y2="310" />
+              <line class="wire" x1="200" y1="310" x2="240" y2="310" />
+              <line class="wire" x1="206" y1="316" x2="234" y2="316" />
+              <line class="wire" x1="212" y1="322" x2="228" y2="322" />
+            </g>
+
+            <!-- Bottom rail (ground) -->
+            <line class="wire" x1="100" y1="250" x2="460" y2="250" />
+            <line class="wire" x1="220" y1="250" x2="220" y2="290" />
+
+            <!-- Leak branch: Vm -- Rm -- Em -- gnd (series) -->
+            <g id="comp-Rm">
+              <line class="wire" x1="140" y1="140" x2="140" y2="155" />
+              <polyline class="wire" points="140,155 132,162 148,170 132,178 148,186 132,194 148,202 140,209" />
+              <line class="wire" x1="140" y1="209" x2="140" y2="220" />
+              <rect class="highlight-ring" x="120" y="150" width="40" height="70" rx="3" />
+              <text class="comp-label" x="158" y="180">Rₘ</text>
+              <text class="cell-label" x="158" y="194">leak channels</text>
+            </g>
+
+            <g id="comp-Em">
+              <!-- battery between Rm and ground -->
+              <line class="wire" x1="128" y1="228" x2="152" y2="228" stroke-width="2.5" />
+              <line class="wire" x1="134" y1="238" x2="146" y2="238" stroke-width="2" />
+              <line class="wire" x1="140" y1="220" x2="140" y2="228" />
+              <line class="wire" x1="140" y1="238" x2="140" y2="250" />
+              <rect class="highlight-ring" x="118" y="214" width="44" height="40" rx="3" />
+              <text class="comp-label" x="158" y="234">Eₘ</text>
+              <text class="cell-label" x="70" y="272">resting potential</text>
+            </g>
+
+            <!-- Cm capacitor branch: Vm to gnd -->
+            <g id="comp-Cm">
+              <line class="wire" x1="220" y1="140" x2="220" y2="175" />
+              <line class="wire" x1="205" y1="175" x2="235" y2="175" stroke-width="2.5" />
+              <line class="wire" x1="205" y1="185" x2="235" y2="185" stroke-width="2.5" />
+              <line class="wire" x1="220" y1="185" x2="220" y2="250" />
+              <rect class="highlight-ring" x="198" y="160" width="44" height="40" rx="3" />
+              <text class="comp-label" x="244" y="178">Cₘ</text>
+              <text class="cell-label" x="244" y="192">lipid bilayer</text>
+            </g>
+
+            <!-- Top membrane rail -->
+            <line class="wire" x1="140" y1="140" x2="340" y2="140" />
+
+            <!-- Vm node -->
+            <g id="comp-Vm">
+              <circle class="node-dot" cx="220" cy="140" r="4" />
+              <text class="comp-label" x="208" y="122">Vₘ</text>
+              <text class="cell-label" x="188" y="108">membrane potential</text>
+              <rect class="highlight-ring" x="175" y="95" width="110" height="55" rx="3" />
+            </g>
+
+            <!-- Access resistance Ra (pipette path) -->
+            <g id="comp-Ra">
+              <line class="wire" x1="340" y1="140" x2="375" y2="140" />
+              <polyline class="wire" points="375,140 383,132 391,148 399,132 407,148 415,140" />
+              <line class="wire" x1="415" y1="140" x2="460" y2="140" />
+              <rect class="highlight-ring" x="368" y="118" width="56" height="44" rx="3" />
+              <text class="comp-label" x="382" y="118">Rₐ</text>
+              <text class="cell-label" x="362" y="168">access / pipette</text>
+            </g>
+
+            <!-- Electrode / clamp source -->
+            <g id="comp-Source">
+              <circle class="node-dot" cx="460" cy="140" r="4" />
+              <line class="wire" x1="460" y1="140" x2="460" y2="200" />
+              <g id="src-Iclamp">
+                <polygon class="wire" points="460,200 440,225 460,250 480,225" fill="var(--bg-1)" />
+                <line class="wire" x1="460" y1="210" x2="460" y2="240" />
+                <polyline class="wire" points="454,218 460,210 466,218" />
+              </g>
+              <g id="src-Vclamp" style="display:none">
+                <line class="wire" x1="448" y1="215" x2="472" y2="215" stroke-width="2.5" />
+                <line class="wire" x1="454" y1="225" x2="466" y2="225" stroke-width="2" />
+                <line class="wire" x1="460" y1="200" x2="460" y2="215" />
+                <line class="wire" x1="460" y1="225" x2="460" y2="250" />
+              </g>
+              <rect class="highlight-ring" x="430" y="190" width="60" height="70" rx="3" />
+              <text class="comp-label" id="srcLabel" x="486" y="228">Iᵢₙⱼ</text>
+              <text class="cell-label" id="srcCellLabel" x="486" y="244">electrode current</text>
+            </g>
+
+            <!-- Membrane dashed box hint -->
+            <rect x="115" y="95" width="150" height="170" rx="6" fill="none" stroke="var(--teal-dim)" stroke-dasharray="4 3" stroke-width="1" opacity="0.55" />
+            <text class="cell-label" x="128" y="88" style="fill: var(--teal)">cell membrane</text>
+          </svg>
+        </div>
+
+        <div class="legend">
+          <span class="l-v">Vₘ trace</span>
+          <span class="l-i">I electrode</span>
+          <span class="l-cmd" id="cmdLegend" style="display:none">V<sub>cmd</sub></span>
+        </div>
+
+        <div class="controls">
+          <div class="ctrl" data-flash="comp-Rm">
+            <label for="Rm">Rₘ — membrane resistance</label>
+            <span class="val" id="RmVal">100 MΩ</span>
+            <span class="sub">leak / open-channel resistance</span>
+            <input type="range" id="Rm" min="10" max="500" step="5" value="100" />
+          </div>
+          <div class="ctrl" data-flash="comp-Cm">
+            <label for="Cm">Cₘ — membrane capacitance</label>
+            <span class="val" id="CmVal">100 pF</span>
+            <span class="sub">lipid bilayer capacitance</span>
+            <input type="range" id="Cm" min="10" max="300" step="5" value="100" />
+          </div>
+          <div class="ctrl" data-flash="comp-Em">
+            <label for="Em">Eₘ — resting potential</label>
+            <span class="val" id="EmVal">−70 mV</span>
+            <span class="sub">Nernst / leak reversal</span>
+            <input type="range" id="Em" min="-90" max="-40" step="1" value="-70" />
+          </div>
+          <div class="ctrl" id="ctrlIinj" data-flash="comp-Source">
+            <label for="Iinj">Iᵢₙⱼ — injected current</label>
+            <span class="val" id="IinjVal">100 pA</span>
+            <span class="sub">current-clamp electrode</span>
+            <input type="range" id="Iinj" min="-200" max="400" step="10" value="100" />
+          </div>
+          <div class="ctrl hidden" id="ctrlVcmd" data-flash="comp-Source">
+            <label for="Vcmd">V<sub>cmd</sub> — command voltage</label>
+            <span class="val" id="VcmdVal">−40 mV</span>
+            <span class="sub">voltage-clamp setpoint</span>
+            <input type="range" id="Vcmd" min="-90" max="20" step="1" value="-40" />
+          </div>
+          <div class="ctrl" id="ctrlRa" data-flash="comp-Ra">
+            <label for="Ra">Rₐ — access resistance</label>
+            <span class="val" id="RaVal">10 MΩ</span>
+            <span class="sub">pipette / series resistance</span>
+            <input type="range" id="Ra" min="0.5" max="100" step="0.5" value="10" />
+          </div>
+
+          <div class="actions">
+            <button type="button" class="primary" id="btnHold">Hold / steady</button>
+            <button type="button" id="btnPulse">Apply step</button>
+            <button type="button" id="btnReset">Reset</button>
+          </div>
+          <div class="compare-bar">
+            <button type="button" id="btnLock" title="Freeze this trace and start a new one for comparison">Lock trace</button>
+            <button type="button" id="btnClearLocks">Clear locked</button>
+            <span class="sub" id="lockHint" style="font-size:0.68rem;color:var(--muted)">Lock up to 5 traces to compare</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plots -->
+      <div class="panel">
+        <div class="panel-head">
+          <span>Full response</span>
+          <span id="modeTag">Current clamp</span>
+        </div>
+        <div class="trace-list" id="traceList" aria-label="Trace legend"></div>
+        <div class="plots">
+          <div class="plot-block">
+            <h3>
+              <span>Membrane voltage Vₘ</span>
+              <span class="live" id="liveV">−70.0 mV</span>
+            </h3>
+            <canvas id="canvasV" width="560" height="160"></canvas>
+          </div>
+          <div class="plot-block">
+            <h3>
+              <span>Electrode current I</span>
+              <span class="live" id="liveI">0.0 pA</span>
+            </h3>
+            <canvas id="canvasI" width="560" height="160"></canvas>
+          </div>
+          <p class="plot-hint" id="plotHint">Fixed axes · 0–100 ms</p>
+        </div>
+      </div>
+    </div>
+
+    <footer>Passive RC membrane · open this file in a browser — no Python required</footer>
+  </div>
+
+  <script>
+(() => {
+  "use strict";
+
+  // ---------- Fixed axes (shared across comparisons) ----------
+  const WINDOW_MS = 100;
+  const ONSET_MS = 10;
+  const PULSE_MS = 25;
+  const V_LO = -100;   // mV
+  const V_HI = 50;     // mV
+  const I_LO = -2500;  // pA
+  const I_HI = 2500;   // pA
+  const MAX_TRACES = 5;
+  const N = 800;
+
+  const TRACE_COLORS = [
+    "#3dbea0",
+    "#e0a45a",
+    "#d47878",
+    "#6db3e8",
+    "#c5d26a",
+  ];
+
+  const state = {
+    mode: "iclamp",
+    protocol: "hold",
+    Rm: 100e6,
+    Cm: 100e-12,
+    Em: -70e-3,
+    Iinj: 100e-12,
+    Vcmd: -40e-3,
+    Ra: 10e6,
+    colorIndex: 0,
+  };
+
+  function emptyBuf() {
+    return {
+      Vm: new Float64Array(N),
+      I: new Float64Array(N),
+      cmd: new Float64Array(N),
+    };
+  }
+
+  const locked = [];
+  let live = {
+    ...emptyBuf(),
+    color: TRACE_COLORS[0],
+    label: "",
+    id: "live",
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    Rm: $("Rm"), Cm: $("Cm"), Em: $("Em"), Iinj: $("Iinj"), Vcmd: $("Vcmd"), Ra: $("Ra"),
+    RmVal: $("RmVal"), CmVal: $("CmVal"), EmVal: $("EmVal"),
+    IinjVal: $("IinjVal"), VcmdVal: $("VcmdVal"), RaVal: $("RaVal"),
+    tauVal: $("tauVal"), liveV: $("liveV"), liveI: $("liveI"),
+    modeI: $("modeI"), modeV: $("modeV"), modeTag: $("modeTag"),
+    ctrlIinj: $("ctrlIinj"), ctrlVcmd: $("ctrlVcmd"), ctrlRa: $("ctrlRa"),
+    cmdLegend: $("cmdLegend"), plotHint: $("plotHint"),
+    srcIclamp: $("src-Iclamp"), srcVclamp: $("src-Vclamp"),
+    srcLabel: $("srcLabel"), srcCellLabel: $("srcCellLabel"),
+    canvasV: $("canvasV"), canvasI: $("canvasI"),
+    btnPulse: $("btnPulse"), btnHold: $("btnHold"), btnReset: $("btnReset"),
+    btnLock: $("btnLock"), btnClearLocks: $("btnClearLocks"),
+    lockHint: $("lockHint"), traceList: $("traceList"),
+  };
+
+  const ctxV = el.canvasV.getContext("2d");
+  const ctxI = el.canvasI.getContext("2d");
+  const PLOT_H = 160;
+
+  function fmtMv(v) { return (v * 1e3).toFixed(1) + " mV"; }
+  function fmtPa(i) {
+    const p = i * 1e12;
+    if (Math.abs(p) >= 1000) return (p / 1000).toFixed(2) + " nA";
+    return p.toFixed(1) + " pA";
+  }
+  function fmtMohm(r) {
+    const m = r / 1e6;
+    return (m < 10 ? m.toFixed(1) : Math.round(m)) + " MΩ";
+  }
+  function fmtPf(c) { return Math.round(c * 1e12) + " pF"; }
+  function fmtTau(ms) { return ms.toFixed(1) + " ms"; }
+  function tauSec() { return state.Rm * state.Cm; }
+
+  function paramLabel() {
+    const tauMs = tauSec() * 1e3;
+    if (state.mode === "iclamp") {
+      return `Rm ${fmtMohm(state.Rm)} · Cm ${fmtPf(state.Cm)} · I ${fmtPa(state.Iinj)} · τ ${fmtTau(tauMs)}`;
+    }
+    return `Rm ${fmtMohm(state.Rm)} · Cm ${fmtPf(state.Cm)} · Vcmd ${fmtMv(state.Vcmd)} · Ra ${fmtMohm(state.Ra)} · τ ${fmtTau(tauMs)}`;
+  }
+
+  function updateLabels() {
+    el.RmVal.textContent = fmtMohm(state.Rm);
+    el.CmVal.textContent = fmtPf(state.Cm);
+    el.EmVal.textContent = fmtMv(state.Em);
+    el.IinjVal.textContent = fmtPa(state.Iinj);
+    el.VcmdVal.textContent = fmtMv(state.Vcmd);
+    el.RaVal.textContent = fmtMohm(state.Ra);
+    el.tauVal.textContent = fmtTau(tauSec() * 1e3);
+  }
+
+  function flash(compId) {
+    const g = document.getElementById(compId);
+    if (!g) return;
+    g.classList.remove("flash");
+    void g.offsetWidth;
+    g.classList.add("flash");
+    setTimeout(() => g.classList.remove("flash"), 560);
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    const isI = mode === "iclamp";
+    el.modeI.classList.toggle("active", isI);
+    el.modeV.classList.toggle("active", !isI);
+    el.ctrlIinj.classList.toggle("hidden", !isI);
+    el.ctrlVcmd.classList.toggle("hidden", isI);
+    el.ctrlRa.classList.toggle("emphasized", !isI);
+    el.cmdLegend.style.display = isI ? "none" : "";
+    el.modeTag.textContent = isI ? "Current clamp" : "Voltage clamp";
+    el.srcIclamp.style.display = isI ? "" : "none";
+    el.srcVclamp.style.display = isI ? "none" : "";
+    el.srcLabel.textContent = isI ? "Iᵢₙⱼ" : "Vcmd";
+    el.srcCellLabel.textContent = isI ? "electrode current" : "clamp command";
+    flash("comp-Source");
+    clearLocked(false);
+    state.colorIndex = 0;
+    live.color = TRACE_COLORS[0];
+    recompute();
+  }
+
+  function setProtocol(protocol) {
+    state.protocol = protocol;
+    el.btnPulse.classList.toggle("primary", protocol === "pulse");
+    el.btnHold.classList.toggle("primary", protocol === "hold");
+    if (protocol !== "rest") flash("comp-Source");
+    recompute();
+  }
+
+  function stimulusActive(tMs) {
+    if (state.protocol === "rest") return false;
+    if (tMs < ONSET_MS) return false;
+    if (state.protocol === "hold") return true;
+    return tMs < ONSET_MS + PULSE_MS;
+  }
+
+  function simulateInto(bufs) {
+    const { Rm, Cm, Em, Ra, Iinj, Vcmd, mode } = state;
+    const windowSec = WINDOW_MS * 1e-3;
+    const dtSample = windowSec / (N - 1);
+    const tau = Math.max(Rm * Cm, 1e-6);
+    const tauA = Math.max(Ra, 1) * Cm;
+    const dtInt = Math.min(dtSample, tauA / 20, tau / 200);
+
+    let Vm = Em;
+    let lastI = 0;
+
+    for (let i = 0; i < N; i++) {
+      const t0 = i * dtSample;
+      const t0Ms = t0 * 1e3;
+
+      if (i > 0) {
+        let t = t0 - dtSample;
+        const tEnd = t0;
+        while (t < tEnd - 1e-15) {
+          const h = Math.min(dtInt, tEnd - t);
+          const on = stimulusActive((t + h * 0.5) * 1e3);
+          if (mode === "iclamp") {
+            const IinjNow = on ? Iinj : 0;
+            const Iion = (Vm - Em) / Rm;
+            Vm += ((IinjNow - Iion) / Cm) * h;
+            lastI = IinjNow;
+          } else {
+            const Vp = on ? Vcmd : Em;
+            const Ia = (Vp - Vm) / Math.max(Ra, 1);
+            const Iion = (Vm - Em) / Rm;
+            Vm += ((Ia - Iion) / Cm) * h;
+            lastI = Ia;
+          }
+          t += h;
+        }
+      } else {
+        lastI = 0;
+      }
+
+      const onNow = stimulusActive(t0Ms);
+      let cmd = Em;
+      let Iel = lastI;
+      if (mode === "iclamp") {
+        Iel = onNow ? Iinj : 0;
+        cmd = Em;
+      } else {
+        cmd = onNow ? Vcmd : Em;
+        Iel = (cmd - Vm) / Math.max(Ra, 1);
+      }
+
+      bufs.Vm[i] = Vm;
+      bufs.I[i] = Iel;
+      bufs.cmd[i] = cmd;
+      lastI = Iel;
+    }
+
+    return { Vm, I: lastI };
+  }
+
+  function recompute() {
+    const end = simulateInto(live);
+    live.label = paramLabel();
+    el.liveV.textContent = fmtMv(end.Vm);
+    el.liveI.textContent = fmtPa(end.I);
+
+    const protoLabel =
+      state.protocol === "pulse" ? `pulse ${PULSE_MS} ms` :
+      state.protocol === "hold" ? "step hold" : "rest";
+    el.plotHint.textContent =
+      `Fixed axes · 0–${WINDOW_MS} ms · onset ${ONSET_MS} ms · ${protoLabel} · live Vm marks 1τ/2τ/3τ` +
+      (state.protocol !== "rest" ? " (≈63% of step at 1τ)" : "");
+
+    updateLabels();
+    updateTraceList();
+    updateLockButton();
+    renderPlots();
+  }
+
+  function nextColor() {
+    for (let k = 0; k < TRACE_COLORS.length; k++) {
+      const idx = (state.colorIndex + 1 + k) % TRACE_COLORS.length;
+      const c = TRACE_COLORS[idx];
+      if (!locked.some((t) => t.color === c)) {
+        state.colorIndex = idx;
+        return c;
+      }
+    }
+    state.colorIndex = (state.colorIndex + 1) % TRACE_COLORS.length;
+    return TRACE_COLORS[state.colorIndex];
+  }
+
+  function totalTraces() { return locked.length + 1; }
+
+  function updateLockButton() {
+    const full = totalTraces() >= MAX_TRACES;
+    el.btnLock.disabled = full;
+    el.lockHint.textContent = full
+      ? "Max 5 traces — clear one to lock another"
+      : `Lock freezes this run (${locked.length} locked · ${totalTraces()}/${MAX_TRACES})`;
+  }
+
+  function lockTrace() {
+    if (totalTraces() >= MAX_TRACES) return;
+    locked.push({
+      Vm: Float64Array.from(live.Vm),
+      I: Float64Array.from(live.I),
+      cmd: Float64Array.from(live.cmd),
+      color: live.color,
+      label: live.label,
+      id: "L" + Date.now() + Math.random().toString(36).slice(2, 6),
+    });
+    const color = nextColor();
+    live = { ...emptyBuf(), color, label: "", id: "live" };
+    recompute();
+  }
+
+  function removeLocked(id) {
+    const idx = locked.findIndex((t) => t.id === id);
+    if (idx >= 0) locked.splice(idx, 1);
+    updateTraceList();
+    updateLockButton();
+    renderPlots();
+  }
+
+  function clearLocked(redraw = true) {
+    locked.length = 0;
+    if (redraw) {
+      updateTraceList();
+      updateLockButton();
+      renderPlots();
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function updateTraceList() {
+    const chips = [];
+    locked.forEach((t, i) => {
+      chips.push(
+        `<span class="trace-chip" style="border-color:${t.color}88">` +
+        `<span class="swatch" style="background:${t.color}"></span>` +
+        `<span>#${i + 1} ${escapeHtml(t.label)}</span>` +
+        `<button type="button" data-rm="${t.id}" aria-label="Remove locked trace">×</button>` +
+        `</span>`
+      );
+    });
+    chips.push(
+      `<span class="trace-chip live" style="border-color:${live.color}">` +
+      `<span class="swatch" style="background:${live.color}"></span>` +
+      `<span>live · ${escapeHtml(live.label)}</span>` +
+      `</span>`
+    );
+    el.traceList.innerHTML = chips.join("");
+    el.traceList.querySelectorAll("button[data-rm]").forEach((btn) => {
+      btn.addEventListener("click", () => removeLocked(btn.getAttribute("data-rm")));
+    });
+  }
+
+  function resizeCanvases() {
+    for (const c of [el.canvasV, el.canvasI]) {
+      const rect = c.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      c.width = Math.round(rect.width * dpr);
+      c.height = Math.round(PLOT_H * dpr);
+      c.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    renderPlots();
+  }
+
+  function drawPlot(ctx, canvas, seriesList, yLo, yHi, yUnit, opts) {
+    opts = opts || {};
+    const w = canvas.clientWidth;
+    const h = PLOT_H;
+    const padL = 52;
+    const padR = 10;
+    const padT = 10;
+    const padB = 22;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const yAt = (v) => padT + plotH - ((v - yLo) / (yHi - yLo)) * plotH;
+    const xAtFrac = (ms) => padL + (ms / WINDOW_MS) * plotW;
+    const xAt = (i) => padL + (i / (N - 1)) * plotW;
+
+    ctx.fillStyle = "#0e1418";
+    ctx.fillRect(padL, padT, plotW, plotH);
+
+    ctx.strokeStyle = "#243440";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < 4; i++) {
+      const y = padT + (plotH * i) / 4;
+      ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y);
+    }
+    for (let i = 1; i < 8; i++) {
+      const x = padL + (plotW * i) / 8;
+      ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH);
+    }
+    ctx.stroke();
+
+    const onsetX = xAtFrac(ONSET_MS);
+    ctx.strokeStyle = "#5a7a8c";
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(onsetX, padT);
+    ctx.lineTo(onsetX, padT + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const s of seriesList) {
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = s.width || 2;
+      ctx.globalAlpha = s.alpha == null ? 1 : s.alpha;
+      ctx.beginPath();
+      for (let i = 0; i < N; i++) {
+        const v = s.buf[i] * s.scale;
+        const y = yAt(Math.max(yLo, Math.min(yHi, v)));
+        const x = xAt(i);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // τ guides on live Vm only (after traces so markers stay visible)
+    if (opts.showTau && opts.tauMs > 0 && yUnit === "mV") {
+      const tauMs = opts.tauMs;
+      const v63 = opts.v63Mv;
+
+      if (v63 != null && Number.isFinite(v63)) {
+        const y63 = yAt(Math.max(yLo, Math.min(yHi, v63)));
+        const x1 = xAtFrac(Math.min(WINDOW_MS, ONSET_MS + tauMs));
+        ctx.strokeStyle = "rgba(240, 216, 120, 0.55)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(onsetX, y63);
+        ctx.lineTo(x1, y63);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(240, 216, 120, 0.95)";
+        ctx.font = "9px DM Sans, sans-serif";
+        ctx.textAlign = "left";
+        if (y63 > padT + 12 && y63 < padT + plotH - 4) {
+          ctx.fillText("≈63%", onsetX + 4, y63 - 3);
+        }
+      }
+
+      ctx.font = "9px DM Sans, sans-serif";
+      ctx.textAlign = "center";
+      for (let k = 1; k <= 3; k++) {
+        const tMs = ONSET_MS + k * tauMs;
+        if (tMs > WINDOW_MS) break;
+        const x = xAtFrac(tMs);
+        ctx.strokeStyle = k === 1 ? "rgba(240, 216, 120, 0.9)" : "rgba(240, 216, 120, 0.45)";
+        ctx.lineWidth = k === 1 ? 1.5 : 1;
+        ctx.setLineDash(k === 1 ? [] : [2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = k === 1 ? "#f0d878" : "rgba(240, 216, 120, 0.75)";
+        ctx.fillText(k + "τ", x, padT + 10);
+
+        if (opts.liveVmMv) {
+          const idx = Math.min(N - 1, Math.round((tMs / WINDOW_MS) * (N - 1)));
+          const v = opts.liveVmMv[idx];
+          const y = yAt(Math.max(yLo, Math.min(yHi, v)));
+          ctx.fillStyle = live.color;
+          ctx.beginPath();
+          ctx.arc(x, y, k === 1 ? 3.5 : 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          if (k === 1) {
+            ctx.strokeStyle = "#f0d878";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    ctx.strokeStyle = "#3a5363";
+    ctx.strokeRect(padL, padT, plotW, plotH);
+
+    ctx.fillStyle = "#8aa0ae";
+    ctx.font = "10px DM Sans, sans-serif";
+    ctx.textAlign = "right";
+    const mid = (yLo + yHi) / 2;
+    if (yUnit === "mV") {
+      ctx.fillText(yHi + " mV", padL - 4, padT + 10);
+      ctx.fillText(String(mid), padL - 4, padT + plotH / 2 + 3);
+      ctx.fillText(yLo + " mV", padL - 4, padT + plotH);
+    } else {
+      const toNa = (pA) => (pA / 1000).toFixed(1);
+      ctx.fillText(toNa(yHi) + " nA", padL - 4, padT + 10);
+      ctx.fillText(toNa(mid), padL - 4, padT + plotH / 2 + 3);
+      ctx.fillText(toNa(yLo) + " nA", padL - 4, padT + plotH);
+    }
+
+    ctx.textAlign = "left";
+    ctx.fillText("0", padL, h - 6);
+    ctx.textAlign = "center";
+    ctx.fillText((WINDOW_MS / 2) + " ms", padL + plotW / 2, h - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(WINDOW_MS + " ms", padL + plotW, h - 6);
+  }
+
+  function tauGuideOpts() {
+    if (state.protocol === "rest") return null;
+    const tauMs = tauSec() * 1e3;
+    if (!(tauMs > 0)) return null;
+
+    const liveVmMv = new Float64Array(N);
+    for (let i = 0; i < N; i++) liveVmMv[i] = live.Vm[i] * 1e3;
+
+    // 63% of the voltage step (1 − 1/e) — where the live curve meets 1τ in current clamp
+    let v63Mv = null;
+    if (state.mode === "iclamp") {
+      const v0 = state.Em * 1e3;
+      const vInf = (state.Em + state.Iinj * state.Rm) * 1e3;
+      v63Mv = v0 + (1 - Math.exp(-1)) * (vInf - v0);
+    } else {
+      // Vclamp steady state (with Ra); 63% marks the step size (time markers still use Rm·Cm)
+      const { Rm, Ra, Em, Vcmd } = state;
+      const v0 = Em * 1e3;
+      const vInf = ((Vcmd * Rm + Em * Ra) / (Rm + Ra)) * 1e3;
+      v63Mv = v0 + (1 - Math.exp(-1)) * (vInf - v0);
+    }
+
+    return {
+      showTau: true,
+      tauMs,
+      v63Mv,
+      liveVmMv,
+    };
+  }
+
+  function allSeries(field) {
+    const out = [];
+    for (const t of locked) {
+      out.push({
+        buf: t[field],
+        scale: field === "I" ? 1e12 : 1e3,
+        color: t.color,
+        width: 1.75,
+        alpha: 0.85,
+      });
+    }
+    out.push({
+      buf: live[field],
+      scale: field === "I" ? 1e12 : 1e3,
+      color: live.color,
+      width: 2.25,
+      alpha: 1,
+    });
+    return out;
+  }
+
+  function renderPlots() {
+    const vSeries = allSeries("Vm");
+    if (state.mode === "vclamp") {
+      vSeries.push({
+        buf: live.cmd,
+        scale: 1e3,
+        color: "#5cb8d4",
+        width: 1,
+        alpha: 0.55,
+      });
+    }
+    drawPlot(ctxV, el.canvasV, vSeries, V_LO, V_HI, "mV", tauGuideOpts());
+    drawPlot(ctxI, el.canvasI, allSeries("I"), I_LO, I_HI, "pA", null);
+  }
+
+  function bindSlider(input, apply, flashId) {
+    input.addEventListener("input", () => {
+      apply(parseFloat(input.value));
+      if (flashId) flash(flashId);
+      recompute();
+    });
+  }
+
+  bindSlider(el.Rm, (v) => { state.Rm = v * 1e6; }, "comp-Rm");
+  bindSlider(el.Cm, (v) => { state.Cm = v * 1e-12; }, "comp-Cm");
+  bindSlider(el.Em, (v) => { state.Em = v * 1e-3; }, "comp-Em");
+  bindSlider(el.Iinj, (v) => { state.Iinj = v * 1e-12; }, "comp-Source");
+  bindSlider(el.Vcmd, (v) => { state.Vcmd = v * 1e-3; }, "comp-Source");
+  bindSlider(el.Ra, (v) => { state.Ra = v * 1e6; }, "comp-Ra");
+
+  el.modeI.addEventListener("click", () => setMode("iclamp"));
+  el.modeV.addEventListener("click", () => setMode("vclamp"));
+  el.btnPulse.addEventListener("click", () => setProtocol("pulse"));
+  el.btnHold.addEventListener("click", () => setProtocol("hold"));
+  el.btnReset.addEventListener("click", () => {
+    setProtocol("rest");
+    flash("comp-Vm");
+  });
+
+  el.btnLock.addEventListener("click", lockTrace);
+  el.btnClearLocks.addEventListener("click", () => {
+    clearLocked(false);
+    state.colorIndex = 0;
+    live.color = TRACE_COLORS[0];
+    recompute();
+  });
+
+  // Style compare buttons like action buttons
+  for (const b of [el.btnLock, el.btnClearLocks]) {
+    b.style.cssText += "font-family:var(--font-ui);font-size:0.78rem;font-weight:500;padding:0.45rem 0.85rem;border-radius:4px;border:1px solid var(--line);background:var(--bg-3);color:var(--text);cursor:pointer;";
+  }
+
+  window.addEventListener("resize", resizeCanvases);
+
+  updateLabels();
+  el.btnHold.classList.add("primary");
+  resizeCanvases();
+  recompute();
+})();
+  </script>
+</body>
+</html>
