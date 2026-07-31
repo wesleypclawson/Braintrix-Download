@@ -966,7 +966,7 @@
   function drawPlot(ctx, canvas, seriesList, yLo, yHi, yUnit) {
     const w = canvas.clientWidth;
     const h = PLOT_H;
-    const padL = 44;
+    const padL = 52;
     const padR = 10;
     const padT = 10;
     const padB = 22;
@@ -1027,16 +1027,15 @@
     ctx.textAlign = "right";
     const mid = (yLo + yHi) / 2;
     if (yUnit === "mV") {
-      ctx.fillText(String(yHi), padL - 4, padT + 10);
+      ctx.fillText(yHi + " mV", padL - 4, padT + 10);
       ctx.fillText(String(mid), padL - 4, padT + plotH / 2 + 3);
-      ctx.fillText(String(yLo), padL - 4, padT + plotH);
+      ctx.fillText(yLo + " mV", padL - 4, padT + plotH);
     } else {
-      const fmtI = (p) => (Math.abs(yHi) >= 1000 || Math.abs(yLo) >= 1000)
-        ? (p / 1000).toFixed(1) + "n"
-        : String(p);
-      ctx.fillText(fmtI(yHi), padL - 4, padT + 10);
-      ctx.fillText(fmtI(mid), padL - 4, padT + plotH / 2 + 3);
-      ctx.fillText(fmtI(yLo), padL - 4, padT + plotH);
+      // Current axis is stored in pA; label in nA for readability
+      const toNa = (pA) => (pA / 1000).toFixed(1);
+      ctx.fillText(toNa(yHi) + " nA", padL - 4, padT + 10);
+      ctx.fillText(toNa(mid), padL - 4, padT + plotH / 2 + 3);
+      ctx.fillText(toNa(yLo) + " nA", padL - 4, padT + plotH);
     }
 
     ctx.textAlign = "left";
