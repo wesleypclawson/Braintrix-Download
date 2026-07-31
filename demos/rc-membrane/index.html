@@ -858,7 +858,8 @@
       state.protocol === "pulse" ? `pulse ${PULSE_MS} ms` :
       state.protocol === "hold" ? "step hold" : "rest";
     el.plotHint.textContent =
-      `Fixed axes · 0–${WINDOW_MS} ms · onset ${ONSET_MS} ms · ${protoLabel} · V [${V_LO}, ${V_HI}] mV · I [${I_LO}, ${I_HI}] pA`;
+      `Fixed axes · 0–${WINDOW_MS} ms · onset ${ONSET_MS} ms · ${protoLabel} · live Vm marks 1τ/2τ/3τ` +
+      (state.protocol !== "rest" ? " (≈63% of step at 1τ)" : "");
 
     updateLabels();
     updateTraceList();
