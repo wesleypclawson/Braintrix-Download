@@ -963,7 +963,8 @@
     renderPlots();
   }
 
-  function drawPlot(ctx, canvas, seriesList, yLo, yHi, yUnit) {
+  function drawPlot(ctx, canvas, seriesList, yLo, yHi, yUnit, opts) {
+    opts = opts || {};
     const w = canvas.clientWidth;
     const h = PLOT_H;
     const padL = 52;
@@ -976,6 +977,7 @@
     ctx.clearRect(0, 0, w, h);
 
     const yAt = (v) => padT + plotH - ((v - yLo) / (yHi - yLo)) * plotH;
+    const xAtFrac = (ms) => padL + (ms / WINDOW_MS) * plotW;
     const xAt = (i) => padL + (i / (N - 1)) * plotW;
 
     ctx.fillStyle = "#0e1418";
@@ -994,7 +996,7 @@
     }
     ctx.stroke();
 
-    const onsetX = padL + (ONSET_MS / WINDOW_MS) * plotW;
+    const onsetX = xAtFrac(ONSET_MS);
     ctx.strokeStyle = "#5a7a8c";
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -1019,6 +1021,64 @@
       ctx.globalAlpha = 1;
     }
 
+    // τ guides on live Vm only (after traces so markers stay visible)
+    if (opts.showTau && opts.tauMs > 0 && yUnit === "mV") {
+      const tauMs = opts.tauMs;
+      const v63 = opts.v63Mv;
+
+      if (v63 != null && Number.isFinite(v63)) {
+        const y63 = yAt(Math.max(yLo, Math.min(yHi, v63)));
+        const x1 = xAtFrac(Math.min(WINDOW_MS, ONSET_MS + tauMs));
+        ctx.strokeStyle = "rgba(240, 216, 120, 0.55)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(onsetX, y63);
+        ctx.lineTo(x1, y63);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(240, 216, 120, 0.95)";
+        ctx.font = "9px DM Sans, sans-serif";
+        ctx.textAlign = "left";
+        if (y63 > padT + 12 && y63 < padT + plotH - 4) {
+          ctx.fillText("≈63%", onsetX + 4, y63 - 3);
+        }
+      }
+
+      ctx.font = "9px DM Sans, sans-serif";
+      ctx.textAlign = "center";
+      for (let k = 1; k <= 3; k++) {
+        const tMs = ONSET_MS + k * tauMs;
+        if (tMs > WINDOW_MS) break;
+        const x = xAtFrac(tMs);
+        ctx.strokeStyle = k === 1 ? "rgba(240, 216, 120, 0.9)" : "rgba(240, 216, 120, 0.45)";
+        ctx.lineWidth = k === 1 ? 1.5 : 1;
+        ctx.setLineDash(k === 1 ? [] : [2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = k === 1 ? "#f0d878" : "rgba(240, 216, 120, 0.75)";
+        ctx.fillText(k + "τ", x, padT + 10);
+
+        if (opts.liveVmMv) {
+          const idx = Math.min(N - 1, Math.round((tMs / WINDOW_MS) * (N - 1)));
+          const v = opts.liveVmMv[idx];
+          const y = yAt(Math.max(yLo, Math.min(yHi, v)));
+          ctx.fillStyle = live.color;
+          ctx.beginPath();
+          ctx.arc(x, y, k === 1 ? 3.5 : 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          if (k === 1) {
+            ctx.strokeStyle = "#f0d878";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
     ctx.strokeStyle = "#3a5363";
     ctx.strokeRect(padL, padT, plotW, plotH);
 
@@ -1031,7 +1091,6 @@
       ctx.fillText(String(mid), padL - 4, padT + plotH / 2 + 3);
       ctx.fillText(yLo + " mV", padL - 4, padT + plotH);
     } else {
-      // Current axis is stored in pA; label in nA for readability
       const toNa = (pA) => (pA / 1000).toFixed(1);
       ctx.fillText(toNa(yHi) + " nA", padL - 4, padT + 10);
       ctx.fillText(toNa(mid), padL - 4, padT + plotH / 2 + 3);
@@ -1044,6 +1103,36 @@
     ctx.fillText((WINDOW_MS / 2) + " ms", padL + plotW / 2, h - 6);
     ctx.textAlign = "right";
     ctx.fillText(WINDOW_MS + " ms", padL + plotW, h - 6);
+  }
+
+  function tauGuideOpts() {
+    if (state.protocol === "rest") return null;
+    const tauMs = tauSec() * 1e3;
+    if (!(tauMs > 0)) return null;
+
+    const liveVmMv = new Float64Array(N);
+    for (let i = 0; i < N; i++) liveVmMv[i] = live.Vm[i] * 1e3;
+
+    // 63% of the voltage step (1 − 1/e) — where the live curve meets 1τ in current clamp
+    let v63Mv = null;
+    if (state.mode === "iclamp") {
+      const v0 = state.Em * 1e3;
+      const vInf = (state.Em + state.Iinj * state.Rm) * 1e3;
+      v63Mv = v0 + (1 - Math.exp(-1)) * (vInf - v0);
+    } else {
+      // Vclamp steady state (with Ra); 63% marks the step size (time markers still use Rm·Cm)
+      const { Rm, Ra, Em, Vcmd } = state;
+      const v0 = Em * 1e3;
+      const vInf = ((Vcmd * Rm + Em * Ra) / (Rm + Ra)) * 1e3;
+      v63Mv = v0 + (1 - Math.exp(-1)) * (vInf - v0);
+    }
+
+    return {
+      showTau: true,
+      tauMs,
+      v63Mv,
+      liveVmMv,
+    };
   }
 
   function allSeries(field) {
@@ -1078,8 +1167,8 @@
         alpha: 0.55,
       });
     }
-    drawPlot(ctxV, el.canvasV, vSeries, V_LO, V_HI, "mV");
-    drawPlot(ctxI, el.canvasI, allSeries("I"), I_LO, I_HI, "pA");
+    drawPlot(ctxV, el.canvasV, vSeries, V_LO, V_HI, "mV", tauGuideOpts());
+    drawPlot(ctxI, el.canvasI, allSeries("I"), I_LO, I_HI, "pA", null);
   }
 
   function bindSlider(input, apply, flashId) {
