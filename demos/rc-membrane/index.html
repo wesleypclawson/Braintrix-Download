@@ -305,6 +305,90 @@
       border-color: var(--teal);
     }
 
+    .actions button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .compare-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+      padding-top: 0.65rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .trace-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.55rem 0.75rem 0.15rem;
+      min-height: 1.6rem;
+    }
+
+    .trace-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.68rem;
+      color: var(--text);
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0.2rem 0.45rem;
+      max-width: 100%;
+    }
+
+    .trace-chip .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .trace-chip.live {
+      border-color: var(--line-bright);
+    }
+
+    .trace-chip button {
+      font-family: var(--font-ui);
+      font-size: 0.65rem;
+      line-height: 1;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0 0.1rem;
+    }
+
+    .trace-chip button:hover { color: var(--rose); }
+
+    .compare-bar button {
+      font-family: var(--font-ui);
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 0.45rem 0.85rem;
+      border-radius: 4px;
+      border: 1px solid var(--line);
+      background: var(--bg-3);
+      color: var(--text);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .compare-bar button:hover:not(:disabled) {
+      border-color: var(--amber);
+      background: var(--amber-dim);
+    }
+
+    .compare-bar button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+
     .plots {
       padding: 0.65rem 0.75rem 0.85rem;
       display: flex;
@@ -514,9 +598,14 @@
           </div>
 
           <div class="actions">
-            <button type="button" class="primary" id="btnPulse">Apply step</button>
-            <button type="button" id="btnHold">Hold / steady</button>
+            <button type="button" class="primary" id="btnHold">Hold / steady</button>
+            <button type="button" id="btnPulse">Apply step</button>
             <button type="button" id="btnReset">Reset</button>
+          </div>
+          <div class="compare-bar">
+            <button type="button" id="btnLock" title="Freeze this trace and start a new one for comparison">Lock trace</button>
+            <button type="button" id="btnClearLocks">Clear locked</button>
+            <span class="sub" id="lockHint" style="font-size:0.68rem;color:var(--muted)">Lock up to 5 traces to compare</span>
           </div>
         </div>
       </div>
@@ -527,6 +616,7 @@
           <span>Full response</span>
           <span id="modeTag">Current clamp</span>
         </div>
+        <div class="trace-list" id="traceList" aria-label="Trace legend"></div>
         <div class="plots">
           <div class="plot-block">
             <h3>
@@ -542,7 +632,7 @@
             </h3>
             <canvas id="canvasI" width="560" height="160"></canvas>
           </div>
-          <p class="plot-hint" id="plotHint">Window = 8τ · step onset at 1τ</p>
+          <p class="plot-hint" id="plotHint">Fixed axes · 0–100 ms</p>
         </div>
       </div>
     </div>
@@ -554,29 +644,53 @@
 (() => {
   "use strict";
 
-  // ---------- State ----------
+  // ---------- Fixed axes (shared across comparisons) ----------
+  const WINDOW_MS = 100;
+  const ONSET_MS = 10;
+  const PULSE_MS = 25;
+  const V_LO = -100;   // mV
+  const V_HI = 50;     // mV
+  const I_LO = -500;   // pA
+  const I_HI = 2500;   // pA
+  const MAX_TRACES = 5;
+  const N = 800;
+
+  const TRACE_COLORS = [
+    "#3dbea0",
+    "#e0a45a",
+    "#d47878",
+    "#6db3e8",
+    "#c5d26a",
+  ];
+
   const state = {
-    mode: "iclamp", // "iclamp" | "vclamp"
-    protocol: "hold", // "hold" | "pulse" | "rest"
-    Rm: 100e6,      // Ohm
-    Cm: 100e-12,    // Farad
-    Em: -70e-3,     // Volt
-    Iinj: 100e-12,  // Amp
-    Vcmd: -40e-3,   // Volt
-    Ra: 10e6,       // Ohm
+    mode: "iclamp",
+    protocol: "hold",
+    Rm: 100e6,
+    Cm: 100e-12,
+    Em: -70e-3,
+    Iinj: 100e-12,
+    Vcmd: -40e-3,
+    Ra: 10e6,
+    colorIndex: 0,
   };
 
-  const N = 800; // samples across the full response window
-  const trace = {
-    tMs: new Float64Array(N),
-    Vm: new Float64Array(N),
-    I: new Float64Array(N),
-    cmd: new Float64Array(N),
-    windowMs: 80,
-    onsetMs: 10,
+  function emptyBuf() {
+    return {
+      Vm: new Float64Array(N),
+      I: new Float64Array(N),
+      cmd: new Float64Array(N),
+    };
+  }
+
+  const locked = [];
+  let live = {
+    ...emptyBuf(),
+    color: TRACE_COLORS[0],
+    label: "",
+    id: "live",
   };
 
-  // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
   const el = {
     Rm: $("Rm"), Cm: $("Cm"), Em: $("Em"), Iinj: $("Iinj"), Vcmd: $("Vcmd"), Ra: $("Ra"),
@@ -590,35 +704,35 @@
     srcLabel: $("srcLabel"), srcCellLabel: $("srcCellLabel"),
     canvasV: $("canvasV"), canvasI: $("canvasI"),
     btnPulse: $("btnPulse"), btnHold: $("btnHold"), btnReset: $("btnReset"),
+    btnLock: $("btnLock"), btnClearLocks: $("btnClearLocks"),
+    lockHint: $("lockHint"), traceList: $("traceList"),
   };
 
   const ctxV = el.canvasV.getContext("2d");
   const ctxI = el.canvasI.getContext("2d");
   const PLOT_H = 160;
 
-  // ---------- Formatting ----------
   function fmtMv(v) { return (v * 1e3).toFixed(1) + " mV"; }
   function fmtPa(i) {
     const p = i * 1e12;
-    const abs = Math.abs(p);
-    if (abs >= 1000) return (p / 1000).toFixed(2) + " nA";
+    if (Math.abs(p) >= 1000) return (p / 1000).toFixed(2) + " nA";
     return p.toFixed(1) + " pA";
-  }
-  function fmtAxis(v, unit) {
-    const abs = Math.abs(v);
-    if (unit === "mV") return v.toFixed(abs >= 10 ? 0 : 1);
-    // pA axis — switch to nA labeling when large
-    if (abs >= 1000) return (v / 1000).toFixed(abs >= 10000 ? 1 : 2) + "n";
-    return v.toFixed(abs >= 10 ? 0 : 1);
   }
   function fmtMohm(r) {
     const m = r / 1e6;
-    return (m < 10 ? m.toFixed(1) : m.toFixed(0)) + " MΩ";
+    return (m < 10 ? m.toFixed(1) : Math.round(m)) + " MΩ";
   }
-  function fmtPf(c) { return (c * 1e12).toFixed(0) + " pF"; }
+  function fmtPf(c) { return Math.round(c * 1e12) + " pF"; }
   function fmtTau(ms) { return ms.toFixed(1) + " ms"; }
-
   function tauSec() { return state.Rm * state.Cm; }
+
+  function paramLabel() {
+    const tauMs = tauSec() * 1e3;
+    if (state.mode === "iclamp") {
+      return `Rm ${fmtMohm(state.Rm)} · Cm ${fmtPf(state.Cm)} · I ${fmtPa(state.Iinj)} · τ ${fmtTau(tauMs)}`;
+    }
+    return `Rm ${fmtMohm(state.Rm)} · Cm ${fmtPf(state.Cm)} · Vcmd ${fmtMv(state.Vcmd)} · Ra ${fmtMohm(state.Ra)} · τ ${fmtTau(tauMs)}`;
+  }
 
   function updateLabels() {
     el.RmVal.textContent = fmtMohm(state.Rm);
@@ -630,7 +744,6 @@
     el.tauVal.textContent = fmtTau(tauSec() * 1e3);
   }
 
-  // ---------- Flash highlight ----------
   function flash(compId) {
     const g = document.getElementById(compId);
     if (!g) return;
@@ -640,7 +753,6 @@
     setTimeout(() => g.classList.remove("flash"), 560);
   }
 
-  // ---------- Mode / protocol ----------
   function setMode(mode) {
     state.mode = mode;
     const isI = mode === "iclamp";
@@ -656,6 +768,9 @@
     el.srcLabel.textContent = isI ? "Iᵢₙⱼ" : "Vcmd";
     el.srcCellLabel.textContent = isI ? "electrode current" : "clamp command";
     flash("comp-Source");
+    clearLocked(false);
+    state.colorIndex = 0;
+    live.color = TRACE_COLORS[0];
     recompute();
   }
 
@@ -667,23 +782,18 @@
     recompute();
   }
 
-  // ---------- Full-response simulation ----------
-  function stimulusActive(tSec, onset, pulseWidth) {
+  function stimulusActive(tMs) {
     if (state.protocol === "rest") return false;
-    if (tSec < onset) return false;
+    if (tMs < ONSET_MS) return false;
     if (state.protocol === "hold") return true;
-    return tSec < onset + pulseWidth;
+    return tMs < ONSET_MS + PULSE_MS;
   }
 
-  function recompute() {
+  function simulateInto(bufs) {
     const { Rm, Cm, Em, Ra, Iinj, Vcmd, mode } = state;
-    const tau = Math.max(tauSec(), 1e-6);
-    // Window spans several τ so the exponential fully settles on screen
-    const windowSec = 8 * tau;
-    const onset = 1 * tau;
-    const pulseWidth = 2 * tau;
+    const windowSec = WINDOW_MS * 1e-3;
     const dtSample = windowSec / (N - 1);
-    // Sub-step for stability when Ra·Cm is much shorter than τ
+    const tau = Math.max(Rm * Cm, 1e-6);
     const tauA = Math.max(Ra, 1) * Cm;
     const dtInt = Math.min(dtSample, tauA / 20, tau / 200);
 
@@ -692,13 +802,14 @@
 
     for (let i = 0; i < N; i++) {
       const t0 = i * dtSample;
-      // Integrate from previous sample to this one (skip on first point)
+      const t0Ms = t0 * 1e3;
+
       if (i > 0) {
         let t = t0 - dtSample;
         const tEnd = t0;
         while (t < tEnd - 1e-15) {
           const h = Math.min(dtInt, tEnd - t);
-          const on = stimulusActive(t + h * 0.5, onset, pulseWidth);
+          const on = stimulusActive((t + h * 0.5) * 1e3);
           if (mode === "iclamp") {
             const IinjNow = on ? Iinj : 0;
             const Iion = (Vm - Em) / Rm;
@@ -717,7 +828,7 @@
         lastI = 0;
       }
 
-      const onNow = stimulusActive(t0, onset, pulseWidth);
+      const onNow = stimulusActive(t0Ms);
       let cmd = Em;
       let Iel = lastI;
       if (mode === "iclamp") {
@@ -728,29 +839,119 @@
         Iel = (cmd - Vm) / Math.max(Ra, 1);
       }
 
-      trace.tMs[i] = t0 * 1e3;
-      trace.Vm[i] = Vm;
-      trace.I[i] = Iel;
-      trace.cmd[i] = cmd;
+      bufs.Vm[i] = Vm;
+      bufs.I[i] = Iel;
+      bufs.cmd[i] = cmd;
       lastI = Iel;
     }
 
-    trace.windowMs = windowSec * 1e3;
-    trace.onsetMs = onset * 1e3;
+    return { Vm, I: lastI };
+  }
+
+  function recompute() {
+    const end = simulateInto(live);
+    live.label = paramLabel();
+    el.liveV.textContent = fmtMv(end.Vm);
+    el.liveI.textContent = fmtPa(end.I);
 
     const protoLabel =
-      state.protocol === "pulse" ? "pulse (2τ wide)" :
+      state.protocol === "pulse" ? `pulse ${PULSE_MS} ms` :
       state.protocol === "hold" ? "step hold" : "rest";
     el.plotHint.textContent =
-      `Window = 8τ (${trace.windowMs.toFixed(1)} ms) · onset at 1τ · ${protoLabel}`;
+      `Fixed axes · 0–${WINDOW_MS} ms · onset ${ONSET_MS} ms · ${protoLabel} · V [${V_LO}, ${V_HI}] mV · I [${I_LO}, ${I_HI}] pA`;
 
-    el.liveV.textContent = fmtMv(Vm);
-    el.liveI.textContent = fmtPa(lastI);
     updateLabels();
+    updateTraceList();
+    updateLockButton();
     renderPlots();
   }
 
-  // ---------- Drawing ----------
+  function nextColor() {
+    for (let k = 0; k < TRACE_COLORS.length; k++) {
+      const idx = (state.colorIndex + 1 + k) % TRACE_COLORS.length;
+      const c = TRACE_COLORS[idx];
+      if (!locked.some((t) => t.color === c)) {
+        state.colorIndex = idx;
+        return c;
+      }
+    }
+    state.colorIndex = (state.colorIndex + 1) % TRACE_COLORS.length;
+    return TRACE_COLORS[state.colorIndex];
+  }
+
+  function totalTraces() { return locked.length + 1; }
+
+  function updateLockButton() {
+    const full = totalTraces() >= MAX_TRACES;
+    el.btnLock.disabled = full;
+    el.lockHint.textContent = full
+      ? "Max 5 traces — clear one to lock another"
+      : `Lock freezes this run (${locked.length} locked · ${totalTraces()}/${MAX_TRACES})`;
+  }
+
+  function lockTrace() {
+    if (totalTraces() >= MAX_TRACES) return;
+    locked.push({
+      Vm: Float64Array.from(live.Vm),
+      I: Float64Array.from(live.I),
+      cmd: Float64Array.from(live.cmd),
+      color: live.color,
+      label: live.label,
+      id: "L" + Date.now() + Math.random().toString(36).slice(2, 6),
+    });
+    const color = nextColor();
+    live = { ...emptyBuf(), color, label: "", id: "live" };
+    recompute();
+  }
+
+  function removeLocked(id) {
+    const idx = locked.findIndex((t) => t.id === id);
+    if (idx >= 0) locked.splice(idx, 1);
+    updateTraceList();
+    updateLockButton();
+    renderPlots();
+  }
+
+  function clearLocked(redraw = true) {
+    locked.length = 0;
+    if (redraw) {
+      updateTraceList();
+      updateLockButton();
+      renderPlots();
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function updateTraceList() {
+    const chips = [];
+    locked.forEach((t, i) => {
+      chips.push(
+        `<span class="trace-chip" style="border-color:${t.color}88">` +
+        `<span class="swatch" style="background:${t.color}"></span>` +
+        `<span>#${i + 1} ${escapeHtml(t.label)}</span>` +
+        `<button type="button" data-rm="${t.id}" aria-label="Remove locked trace">×</button>` +
+        `</span>`
+      );
+    });
+    chips.push(
+      `<span class="trace-chip live" style="border-color:${live.color}">` +
+      `<span class="swatch" style="background:${live.color}"></span>` +
+      `<span>live · ${escapeHtml(live.label)}</span>` +
+      `</span>`
+    );
+    el.traceList.innerHTML = chips.join("");
+    el.traceList.querySelectorAll("button[data-rm]").forEach((btn) => {
+      btn.addEventListener("click", () => removeLocked(btn.getAttribute("data-rm")));
+    });
+  }
+
   function resizeCanvases() {
     for (const c of [el.canvasV, el.canvasI]) {
       const rect = c.getBoundingClientRect();
@@ -762,36 +963,7 @@
     renderPlots();
   }
 
-  function dataRange(bufs, scale) {
-    let lo = Infinity, hi = -Infinity;
-    for (const buf of bufs) {
-      for (let i = 0; i < buf.length; i++) {
-        const v = buf[i] * scale;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
-      }
-    }
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
-      lo = -1; hi = 1;
-    }
-    if (hi === lo) {
-      const pad = Math.max(Math.abs(hi) * 0.1, 1);
-      lo -= pad;
-      hi += pad;
-    } else {
-      const pad = (hi - lo) * 0.12;
-      lo -= pad;
-      hi += pad;
-    }
-    // Keep a tiny span away from zero-collapse
-    if (hi - lo < 1e-6) {
-      lo -= 1;
-      hi += 1;
-    }
-    return { lo, hi };
-  }
-
-  function drawPlot(ctx, canvas, series, yUnit) {
+  function drawPlot(ctx, canvas, seriesList, yLo, yHi, yUnit) {
     const w = canvas.clientWidth;
     const h = PLOT_H;
     const padL = 44;
@@ -803,16 +975,12 @@
 
     ctx.clearRect(0, 0, w, h);
 
-    const bufs = series.map((s) => s.buf);
-    const { lo, hi } = dataRange(bufs, series[0].scale);
-    const yAt = (v) => padT + plotH - ((v - lo) / (hi - lo)) * plotH;
+    const yAt = (v) => padT + plotH - ((v - yLo) / (yHi - yLo)) * plotH;
     const xAt = (i) => padL + (i / (N - 1)) * plotW;
 
-    // plot background
     ctx.fillStyle = "#0e1418";
     ctx.fillRect(padL, padT, plotW, plotH);
 
-    // grid
     ctx.strokeStyle = "#243440";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -826,8 +994,7 @@
     }
     ctx.stroke();
 
-    // onset marker
-    const onsetX = padL + (trace.onsetMs / trace.windowMs) * plotW;
+    const onsetX = padL + (ONSET_MS / WINDOW_MS) * plotW;
     ctx.strokeStyle = "#5a7a8c";
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -836,50 +1003,86 @@
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // traces
-    for (const s of series) {
+    for (const s of seriesList) {
       ctx.strokeStyle = s.color;
       ctx.lineWidth = s.width || 2;
+      ctx.globalAlpha = s.alpha == null ? 1 : s.alpha;
       ctx.beginPath();
       for (let i = 0; i < N; i++) {
-        const y = yAt(s.buf[i] * s.scale);
+        const v = s.buf[i] * s.scale;
+        const y = yAt(Math.max(yLo, Math.min(yHi, v)));
         const x = xAt(i);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       }
       ctx.stroke();
+      ctx.globalAlpha = 1;
     }
 
-    // frame
     ctx.strokeStyle = "#3a5363";
     ctx.strokeRect(padL, padT, plotW, plotH);
 
-    // Y labels
     ctx.fillStyle = "#8aa0ae";
     ctx.font = "10px DM Sans, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(fmtAxis(hi, yUnit), padL - 4, padT + 10);
-    ctx.fillText(fmtAxis(lo, yUnit), padL - 4, padT + plotH);
-    ctx.fillText(fmtAxis((lo + hi) / 2, yUnit), padL - 4, padT + plotH / 2 + 3);
+    const mid = (yLo + yHi) / 2;
+    if (yUnit === "mV") {
+      ctx.fillText(String(yHi), padL - 4, padT + 10);
+      ctx.fillText(String(mid), padL - 4, padT + plotH / 2 + 3);
+      ctx.fillText(String(yLo), padL - 4, padT + plotH);
+    } else {
+      const fmtI = (p) => (Math.abs(yHi) >= 1000 || Math.abs(yLo) >= 1000)
+        ? (p / 1000).toFixed(1) + "n"
+        : String(p);
+      ctx.fillText(fmtI(yHi), padL - 4, padT + 10);
+      ctx.fillText(fmtI(mid), padL - 4, padT + plotH / 2 + 3);
+      ctx.fillText(fmtI(yLo), padL - 4, padT + plotH);
+    }
 
-    // X labels (time)
     ctx.textAlign = "left";
     ctx.fillText("0", padL, h - 6);
     ctx.textAlign = "center";
-    ctx.fillText((trace.windowMs / 2).toFixed(1) + " ms", padL + plotW / 2, h - 6);
+    ctx.fillText((WINDOW_MS / 2) + " ms", padL + plotW / 2, h - 6);
     ctx.textAlign = "right";
-    ctx.fillText(trace.windowMs.toFixed(1) + " ms", padL + plotW, h - 6);
+    ctx.fillText(WINDOW_MS + " ms", padL + plotW, h - 6);
+  }
+
+  function allSeries(field) {
+    const out = [];
+    for (const t of locked) {
+      out.push({
+        buf: t[field],
+        scale: field === "I" ? 1e12 : 1e3,
+        color: t.color,
+        width: 1.75,
+        alpha: 0.85,
+      });
+    }
+    out.push({
+      buf: live[field],
+      scale: field === "I" ? 1e12 : 1e3,
+      color: live.color,
+      width: 2.25,
+      alpha: 1,
+    });
+    return out;
   }
 
   function renderPlots() {
-    const vSeries = [{ buf: trace.Vm, scale: 1e3, color: "#3dbea0", width: 2 }];
+    const vSeries = allSeries("Vm");
     if (state.mode === "vclamp") {
-      vSeries.push({ buf: trace.cmd, scale: 1e3, color: "#5cb8d4", width: 1.25 });
+      vSeries.push({
+        buf: live.cmd,
+        scale: 1e3,
+        color: "#5cb8d4",
+        width: 1,
+        alpha: 0.55,
+      });
     }
-    drawPlot(ctxV, el.canvasV, vSeries, "mV");
-    drawPlot(ctxI, el.canvasI, [{ buf: trace.I, scale: 1e12, color: "#e0a45a", width: 2 }], "pA");
+    drawPlot(ctxV, el.canvasV, vSeries, V_LO, V_HI, "mV");
+    drawPlot(ctxI, el.canvasI, allSeries("I"), I_LO, I_HI, "pA");
   }
 
-  // ---------- Events ----------
   function bindSlider(input, apply, flashId) {
     input.addEventListener("input", () => {
       apply(parseFloat(input.value));
@@ -897,7 +1100,6 @@
 
   el.modeI.addEventListener("click", () => setMode("iclamp"));
   el.modeV.addEventListener("click", () => setMode("vclamp"));
-
   el.btnPulse.addEventListener("click", () => setProtocol("pulse"));
   el.btnHold.addEventListener("click", () => setProtocol("hold"));
   el.btnReset.addEventListener("click", () => {
@@ -905,9 +1107,21 @@
     flash("comp-Vm");
   });
 
+  el.btnLock.addEventListener("click", lockTrace);
+  el.btnClearLocks.addEventListener("click", () => {
+    clearLocked(false);
+    state.colorIndex = 0;
+    live.color = TRACE_COLORS[0];
+    recompute();
+  });
+
+  // Style compare buttons like action buttons
+  for (const b of [el.btnLock, el.btnClearLocks]) {
+    b.style.cssText += "font-family:var(--font-ui);font-size:0.78rem;font-weight:500;padding:0.45rem 0.85rem;border-radius:4px;border:1px solid var(--line);background:var(--bg-3);color:var(--text);cursor:pointer;";
+  }
+
   window.addEventListener("resize", resizeCanvases);
 
-  // Init — default hold step so the full response is visible immediately
   updateLabels();
   el.btnHold.classList.add("primary");
   resizeCanvases();
